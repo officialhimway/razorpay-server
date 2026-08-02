@@ -51,8 +51,10 @@ app.post("/verify-payment", async (req, res) => {
 
             auth_id,
             purchase_type,
+
             folder_id,
             note_id,
+            test_id,
         } = req.body;
 
         const body = razorpay_order_id + "|" + razorpay_payment_id;
@@ -96,7 +98,31 @@ app.post("/verify-payment", async (req, res) => {
                 });
             }
         }
+// ===== MOCK TEST PURCHASE =====
+if (purchase_type === "mock") {
 
+    const { error } = await supabase
+        .from("purchases")
+        .upsert(
+            {
+                auth_id,
+                test_id,
+                payment_id: razorpay_payment_id,
+            },
+            {
+                onConflict: "auth_id,test_id",
+            }
+        );
+
+    if (error) {
+        console.log("Mock Purchase Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+}
         return res.json({
             success: true,
         });
