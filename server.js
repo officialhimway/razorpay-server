@@ -55,6 +55,7 @@ app.post("/verify-payment", async (req, res) => {
             folder_id,
             note_id,
             test_id,
+            course_id,
         } = req.body;
 
         const body = razorpay_order_id + "|" + razorpay_payment_id;
@@ -90,6 +91,20 @@ app.post("/verify-payment", async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "folder_id is required",
+            });
+        }
+
+        if (purchase_type === "live" && !test_id) {
+            return res.status(400).json({
+                success: false,
+                message: "test_id is required",
+            });
+        }
+
+        if (purchase_type === "course" && !course_id) {
+            return res.status(400).json({
+                success: false,
+                message: "course_id is required",
             });
         }
 
@@ -191,7 +206,87 @@ app.post("/verify-payment", async (req, res) => {
                 }
             }
         }
+        // ===== LIVE TEST PURCHASE =====
+        if (purchase_type === "live") {
 
+            const { error } = await supabase
+                .from("live_test_enrollments")
+                .upsert(
+                    {
+                        user_id: auth_id,
+                        test_id,
+                        payment_id: razorpay_payment_id,
+                    },
+                    {
+                        onConflict: "user_id,test_id",
+                    }
+                );
+
+            if (error) {
+                console.log("Live Purchase Error:", error);
+
+                return res.status(500).json({
+                    success: false,
+                    message: error.message,
+                });
+            }
+        }
+        // ===== COURSE PURCHASE =====
+        if (purchase_type === "course") {
+
+            const { data: course, error: courseError } = await supabase
+                .from("courses")
+                .select("final_price, valid_till")
+                .eq("id", course_id)
+                .single();
+
+            if (courseError || !course) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Course not found",
+                });
+            }
+
+            const { error: paymentError } = await supabase
+                .from("course_payments")
+                .insert({
+                    auth_id,
+                    course_id,
+                    razorpay_payment_id: razorpay_payment_id,
+                    amount: course.final_price,
+                    currency: "INR",
+                    status: "success",
+                });
+
+            if (paymentError) {
+                return res.status(500).json({
+                    success: false,
+                    message: paymentError.message,
+                });
+            }
+
+            const { error: enrollError } = await supabase
+                .from("course_enrollments")
+                .upsert(
+                    {
+                        auth_id,
+                        course_id,
+                        access_type: "buy",
+                        access_valid_till: course.valid_till,
+                        is_active: true,
+                    },
+                    {
+                        onConflict: "auth_id,course_id",
+                    }
+                );
+
+            if (enrollError) {
+                return res.status(500).json({
+                    success: false,
+                    message: enrollError.message,
+                });
+            }
+        }
         return res.json({
             success: true,
         });
