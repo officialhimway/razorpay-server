@@ -70,7 +70,35 @@ app.post("/verify-payment", async (req, res) => {
                 message: "Invalid Signature",
             });
         }
+        // ===== REQUEST VALIDATION =====
 
+        if (!auth_id) {
+            return res.status(400).json({
+                success: false,
+                message: "auth_id is required",
+            });
+        }
+
+        if (purchase_type === "mock" && !test_id) {
+            return res.status(400).json({
+                success: false,
+                message: "test_id is required",
+            });
+        }
+
+        if (purchase_type === "mock_bundle" && !folder_id) {
+            return res.status(400).json({
+                success: false,
+                message: "folder_id is required",
+            });
+        }
+
+        if (purchase_type === "notes" && !folder_id && !note_id) {
+            return res.status(400).json({
+                success: false,
+                message: "folder_id or note_id is required",
+            });
+        }
         // ===== NOTES PURCHASE =====
         if (purchase_type === "notes") {
             const purchaseData = {
@@ -98,31 +126,72 @@ app.post("/verify-payment", async (req, res) => {
                 });
             }
         }
-// ===== MOCK TEST PURCHASE =====
-if (purchase_type === "mock") {
+        // ===== MOCK TEST PURCHASE =====
+        if (purchase_type === "mock") {
 
-    const { error } = await supabase
-        .from("purchases")
-        .upsert(
-            {
-                auth_id,
-                test_id,
-                payment_id: razorpay_payment_id,
-            },
-            {
-                onConflict: "auth_id,test_id",
+            const { error } = await supabase
+                .from("purchases")
+                .upsert(
+                    {
+                        auth_id,
+                        test_id,
+                        payment_id: razorpay_payment_id,
+                    },
+                    {
+                        onConflict: "auth_id,test_id",
+                    }
+                );
+
+            if (error) {
+                console.log("Mock Purchase Error:", error);
+
+                return res.status(500).json({
+                    success: false,
+                    message: error.message,
+                });
             }
-        );
+        }
+        // ===== MOCK BUNDLE PURCHASE =====
+        if (purchase_type === "mock_bundle") {
 
-    if (error) {
-        console.log("Mock Purchase Error:", error);
+            const { data: tests, error: fetchError } = await supabase
+                .from("mock_tests")
+                .select("id")
+                .eq("folder_id", folder_id)
+                .eq("is_paid", true);
 
-        return res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-}
+            if (fetchError) {
+                return res.status(500).json({
+                    success: false,
+                    message: fetchError.message,
+                });
+            }
+
+            if (tests?.length) {
+
+                const rows = tests.map((t) => ({
+                    auth_id,
+                    test_id: t.id,
+                    payment_id: razorpay_payment_id,
+                }));
+
+                const { error } = await supabase
+                    .from("purchases")
+                    .upsert(rows, {
+                        onConflict: "auth_id,test_id",
+                    });
+
+                if (error) {
+                    console.log(error);
+
+                    return res.status(500).json({
+                        success: false,
+                        message: error.message,
+                    });
+                }
+            }
+        }
+
         return res.json({
             success: true,
         });
