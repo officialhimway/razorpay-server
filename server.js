@@ -21,7 +21,15 @@ const supabase = createClient(
 // Create Order
 app.post("/create-order", async (req, res) => {
     try {
-        const { amount } = req.body;
+        let { amount } = req.body;
+        const { offer_id, auth_id } = req.body;
+        // Timed exam pass price is always read on the server, never trusted from the app.
+        if (offer_id) {
+            if (!auth_id) return res.status(400).json({ success: false, error: "auth_id is required" });
+            const { data: offer, error: offerError } = await supabase.from("exam_access_offers").select("price, is_active").eq("id", offer_id).single();
+            if (offerError || !offer?.is_active) return res.status(404).json({ success: false, error: "Active premium offer not found" });
+            amount = offer.price;
+        }
 
         const options = {
             amount: Math.round(Number(amount) * 100),
@@ -44,6 +52,7 @@ app.post("/create-order", async (req, res) => {
 // Verify Payment
 app.post("/verify-payment", async (req, res) => {
     try {
+        let examAccessPass = null;
         const {
             razorpay_order_id,
             razorpay_payment_id,
@@ -56,6 +65,7 @@ app.post("/verify-payment", async (req, res) => {
             note_id,
             test_id,
             course_id,
+            offer_id,
         } = req.body;
 
         const body = razorpay_order_id + "|" + razorpay_payment_id;
@@ -106,6 +116,9 @@ app.post("/verify-payment", async (req, res) => {
                 success: false,
                 message: "course_id is required",
             });
+        }
+        if (purchase_type === "exam_access" && !offer_id) {
+            return res.status(400).json({ success: false, message: "offer_id is required" });
         }
 
         if (purchase_type === "notes" && !folder_id && !note_id) {
@@ -287,8 +300,20 @@ app.post("/verify-payment", async (req, res) => {
                 });
             }
         }
+        // ===== EXAM-WISE TIMED PREMIUM PASS =====
+        if (purchase_type === "exam_access") {
+            const { data: offer, error: offerError } = await supabase.from("exam_access_offers").select("id, exam_id, access_scope, price, duration_hours, is_active").eq("id", offer_id).single();
+            if (offerError || !offer?.is_active) return res.status(404).json({ success: false, message: "Active premium offer not found" });
+            const { data: currentPass } = await supabase.from("exam_access_passes").select("expires_at").eq("auth_id", auth_id).eq("exam_id", offer.exam_id).eq("access_scope", offer.access_scope).eq("status", "active").gt("expires_at", new Date().toISOString()).order("expires_at", { ascending: false }).limit(1).maybeSingle();
+            const base = currentPass ? new Date(currentPass.expires_at) : new Date();
+            const expiresAt = new Date(base.getTime() + offer.duration_hours * 60 * 60 * 1000).toISOString();
+            const { data: createdPass, error: passError } = await supabase.from("exam_access_passes").insert({ auth_id, offer_id: offer.id, exam_id: offer.exam_id, access_scope: offer.access_scope, expires_at: expiresAt, payment_id: razorpay_payment_id, amount: offer.price }).select("id, exam_id, expires_at").single();
+            if (passError) return res.status(500).json({ success: false, message: passError.message });
+            examAccessPass = createdPass;
+        }
         return res.json({
             success: true,
+            examAccessPass,
         });
 
     } catch (err) {
