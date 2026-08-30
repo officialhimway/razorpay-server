@@ -183,7 +183,7 @@ app.post("/verify-payment", async (req, res) => {
         if (purchase_type === "mock_bundle") {
 
             const { data: tests, error: fetchError } = await supabase
-                .from("mock_tests")
+                .from("mocktests")
                 .select("id")
                 .eq("folder_id", folder_id)
                 .eq("is_paid", true);
