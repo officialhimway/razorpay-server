@@ -307,7 +307,7 @@ app.post("/verify-payment", async (req, res) => {
         }
         // ===== EXAM-WISE TIMED PREMIUM PASS =====
         if (purchase_type === "exam_access") {
-            const { data: offer, error: offerError } = await supabase.from("exam_access_offers").select("id, exam_id, access_scope, price, duration_hours, is_active").eq("id", offer_id).single();
+            const { data: offer, error: offerError } = await supabase.from("exam_access_offers").select("id, exam_id, price, duration_hours, is_active").eq("id", offer_id).eq("access_scope", "mocktests").single();
             if (offerError || !offer?.is_active) {
                 console.error("Premium pass offer lookup failed", {
                     offer_id,
@@ -316,10 +316,10 @@ app.post("/verify-payment", async (req, res) => {
                 });
                 return res.status(404).json({ success: false, message: "Active premium offer not found" });
             }
-            const { data: currentPass } = await supabase.from("exam_access_passes").select("expires_at").eq("auth_id", auth_id).eq("exam_id", offer.exam_id).eq("access_scope", offer.access_scope).eq("status", "active").gt("expires_at", new Date().toISOString()).order("expires_at", { ascending: false }).limit(1).maybeSingle();
+            const { data: currentPass } = await supabase.from("exam_access_passes").select("expires_at").eq("auth_id", auth_id).eq("exam_id", offer.exam_id).eq("access_scope", "mocktests").eq("status", "active").gt("expires_at", new Date().toISOString()).order("expires_at", { ascending: false }).limit(1).maybeSingle();
             const base = currentPass ? new Date(currentPass.expires_at) : new Date();
             const expiresAt = new Date(base.getTime() + offer.duration_hours * 60 * 60 * 1000).toISOString();
-            const { data: createdPass, error: passError } = await supabase.from("exam_access_passes").insert({ auth_id, offer_id: offer.id, exam_id: offer.exam_id, access_scope: offer.access_scope, expires_at: expiresAt, payment_id: razorpay_payment_id, amount: offer.price }).select("id, exam_id, expires_at").single();
+            const { data: createdPass, error: passError } = await supabase.from("exam_access_passes").insert({ auth_id, offer_id: offer.id, exam_id: offer.exam_id, access_scope: "mocktests", expires_at: expiresAt, payment_id: razorpay_payment_id, amount: offer.price }).select("id, exam_id, expires_at").single();
             if (passError) {
                 console.error("Premium pass insert failed", {
                     razorpay_payment_id,
