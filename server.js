@@ -76,6 +76,11 @@ app.post("/verify-payment", async (req, res) => {
             .digest("hex");
 
         if (expectedSignature !== razorpay_signature) {
+            console.error("Payment verification signature mismatch", {
+                razorpay_order_id,
+                razorpay_payment_id,
+                purchase_type,
+            });
             return res.status(400).json({
                 success: false,
                 message: "Invalid Signature",
@@ -303,12 +308,27 @@ app.post("/verify-payment", async (req, res) => {
         // ===== EXAM-WISE TIMED PREMIUM PASS =====
         if (purchase_type === "exam_access") {
             const { data: offer, error: offerError } = await supabase.from("exam_access_offers").select("id, exam_id, access_scope, price, duration_hours, is_active").eq("id", offer_id).single();
-            if (offerError || !offer?.is_active) return res.status(404).json({ success: false, message: "Active premium offer not found" });
+            if (offerError || !offer?.is_active) {
+                console.error("Premium pass offer lookup failed", {
+                    offer_id,
+                    code: offerError?.code,
+                    message: offerError?.message,
+                });
+                return res.status(404).json({ success: false, message: "Active premium offer not found" });
+            }
             const { data: currentPass } = await supabase.from("exam_access_passes").select("expires_at").eq("auth_id", auth_id).eq("exam_id", offer.exam_id).eq("access_scope", offer.access_scope).eq("status", "active").gt("expires_at", new Date().toISOString()).order("expires_at", { ascending: false }).limit(1).maybeSingle();
             const base = currentPass ? new Date(currentPass.expires_at) : new Date();
             const expiresAt = new Date(base.getTime() + offer.duration_hours * 60 * 60 * 1000).toISOString();
             const { data: createdPass, error: passError } = await supabase.from("exam_access_passes").insert({ auth_id, offer_id: offer.id, exam_id: offer.exam_id, access_scope: offer.access_scope, expires_at: expiresAt, payment_id: razorpay_payment_id, amount: offer.price }).select("id, exam_id, expires_at").single();
-            if (passError) return res.status(500).json({ success: false, message: passError.message });
+            if (passError) {
+                console.error("Premium pass insert failed", {
+                    razorpay_payment_id,
+                    offer_id,
+                    code: passError.code,
+                    message: passError.message,
+                });
+                return res.status(500).json({ success: false, message: passError.message });
+            }
             examAccessPass = createdPass;
         }
         return res.json({
